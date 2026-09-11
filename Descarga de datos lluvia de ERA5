@@ -1,0 +1,44 @@
+var COLOR = {geometry: '0228fc'};  // Cambié 'rdi' por 'geometry' en el color
+
+// Obtener datos de precipitación de ERA5
+var dataset = ee.ImageCollection('ECMWF/ERA5_LAND/MONTHLY_AGGR').select('total_precipitation_sum');
+
+// Filtrar la colección de imágenes por fecha y región
+var precipitacion = dataset.filterBounds(geometry)
+    .filterDate('2018-01-01', '2026-05-31');
+
+// Convertir precipitación de metros a milímetros multiplicando por 1000
+var precipitacionEnMM = precipitacion.map(function(image) {
+  return image.multiply(1000).set('system:time_start', image.get('system:time_start'));
+});
+
+// Graficar series de tiempo de precipitación en milímetros
+var ppTimeSeries = ui.Chart.image.seriesByRegion({
+  imageCollection: precipitacionEnMM,  // Usar la colección con precipitación en mm
+  regions: geometry,
+  reducer: ee.Reducer.mean(),
+  scale: 300,
+  xProperty: 'system:time_start',
+  seriesProperty: 'label'
+});
+
+// Ajustar tipo de gráfico y opciones
+ppTimeSeries.setChartType('ScatterChart');
+ppTimeSeries.setOptions({
+  title: 'Región de interés',
+  vAxis: {
+    title: 'Precipitación (mm)'  // Ajustar la etiqueta del eje Y a mm
+  },
+  lineWidth: 1,
+  pointSize: 2,
+  series: {
+    0: {color: COLOR.geometry}
+  }
+});
+
+// Mostrar el gráfico en la consola
+print(ppTimeSeries);
+
+// Agregar la capa de la región al mapa
+Map.addLayer(geometry, {color: COLOR.geometry});
+Map.centerObject(geometry, 10);
