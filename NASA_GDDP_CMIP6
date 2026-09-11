@@ -1,0 +1,52 @@
+// Cargar la colección de datos NASA/GDDP-CMIP6 de preferencia 8 años
+var dataset = ee.ImageCollection("NASA/GDDP-CMIP6")
+              .filterBounds(table2);
+Map.addLayer(table2)
+// Definir fechas de inicio y fin
+var startDate = '2018-05-01';
+var endDate = '2026-05-31';
+
+// Filtrar la colección de imágenes por fecha
+var filteredDataset = dataset.filterDate(startDate, endDate)
+                             .select('pr');
+
+// Calcular la suma mensual de precipitación y convertir a milímetros
+var monthlyPrecipitation = ee.ImageCollection(
+  ee.List.sequence(0, ee.Date(endDate).difference(ee.Date(startDate), 'month').subtract(1)).map(function(n) {
+    var start = ee.Date(startDate).advance(n, 'month');
+    var end = start.advance(1, 'month');
+    var monthlySum = filteredDataset.filterDate(start, end)
+                                    .sum()
+                                    .multiply(1000)  // Convertir de metros a milímetros
+                                    .set('system:time_start', start.millis());
+    return monthlySum;
+  })
+);
+
+// Imprimir información sobre la colección resultante
+print('Monthly Precipitation Collection:', monthlyPrecipitation);
+
+// Graficar la serie temporal de precipitación mensual en barras
+var chart = ui.Chart.image.seriesByRegion({
+  imageCollection: monthlyPrecipitation,
+  regions: table2,
+  reducer: ee.Reducer.mean(),
+  band: 'pr',
+  scale: 20000,
+  xProperty: 'system:time_start',
+  seriesProperty: 'label'
+}).setChartType('ColumnChart')  // Cambiar a gráfico de barras
+  .setOptions({
+    title: 'Precipitación mensual',
+    vAxis: {title: 'Precipitación (mm)'},  // Ajustar el título del eje Y a milímetros
+    hAxis: {title: 'Date'},
+    lineWidth: 2,
+    pointSize: 3
+});
+
+// Mostrar el gráfico en la consola
+print(chart);
+
+// Centrar el mapa en el table y añadir la capa del table
+Map.centerObject(table2, 8);
+Map.addLayer(table2, {color: 'red'}, 'table');
