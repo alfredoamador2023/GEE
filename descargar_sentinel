@@ -1,0 +1,82 @@
+// ======================================================
+// SENTINEL-2 SR HARMONIZED - COMPOSITE
+// ======================================================
+
+// Función para enmascarar nubes y cirrus
+function maskS2clouds(image) {
+  
+  var qa = image.select('QA60');
+
+  // Bit 10 = nubes
+  // Bit 11 = cirrus
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+               .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return image
+      .updateMask(mask)
+      .divide(10000)
+      .select('B.*')
+      .copyProperties(image, ['system:time_start']);
+}
+
+
+// ======================================================
+// COLECCIÓN SENTINEL-2
+// ======================================================
+
+var collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+    .filterDate('2026-05-01', '2026-09-11')
+    .filterBounds(geometry)
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 15))
+    .map(maskS2clouds);
+
+
+// Ver cuántas imágenes quedaron
+print('Número de imágenes:', collection.size());
+
+
+// ======================================================
+// COMPUESTO MEDIANA
+// ======================================================
+
+var composite = collection.median();
+
+
+// ======================================================
+// VISUALIZACIÓN
+// ======================================================
+
+Map.centerObject(geometry, 11);
+
+Map.addLayer(
+  composite,
+  {
+    bands: ['B4', 'B3', 'B2'],
+    min: 0.05,
+    max: 0.30
+  },
+  'Sentinel-2 RGB'
+);
+
+
+// Recortar al área de estudio
+var prueba = composite.clip(geometry);
+
+Map.addLayer(geometry, {}, 'Área de estudio');
+
+
+// ======================================================
+// EXPORTACIÓN
+// ======================================================
+
+Export.image.toDrive({
+  image: prueba,
+  description: 'Sentinel2_2026b',
+  scale: 10,
+  region: geometry,
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF'
+});
