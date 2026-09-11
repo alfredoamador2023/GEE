@@ -1,0 +1,91 @@
+//Cargar colección de imágenes con valores de reflectancia. LANDSAT/LT05/C02/T1_TOA; COPERNICUS/S2
+var Coleccion = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED');
+// Declarar la variable dependiente a modelar.
+var dependent = 'NDVI';
+// El número de ciclos por año del modelo.
+var harmonics = 1;
+// Hacer lista de frecuencias armónicas para el modelo.
+// Esto también sirve como sufijo de nombre de bandas.
+var harmonicFrequencies = ee.List.sequence(1, harmonics);
+// Función para obtener una secuencia de nombres de bandas para los términos de la armonía.
+var constructBandNames = function(base, list) {
+  return ee.List(list).map(function(i) {
+    return ee.String(base).cat(ee.Number(i).int());
+  });
+};
+// Construir la lista de nombres de términos armónicos.
+var cosNames = constructBandNames('cos_', harmonicFrequencies);
+var sinNames = constructBandNames('sin_', harmonicFrequencies);
+// Variables independientes.
+var independents = ee.List(['constant', 't'])
+  .cat(cosNames).cat(sinNames);
+// Función para agregar NDVI, la variable dependiente.
+var addNDVI = function(image) {
+  return image
+    .addBands(image.normalizedDifference(['B8', 'B4'])
+    .rename('NDVI'))
+    .float();
+};
+// Función para agregar una banda de tiempo.
+var addDependents = function(image) {
+  // Calcular tiempo en fracción de año desde que empieza serie sentinel.
+  var years = image.date().difference('2018-01-01', 'year');
+  var timeRadians = ee.Image(years.multiply(2 * Math.PI)).rename('t');
+  var constant = ee.Image(1);
+  return image.addBands(constant).addBands(timeRadians.float());
+};
+// Función para calcular el número especificado de armonías
+// y agregarlas como bandas.  Se asume que la banda de tiempo está presente.
+var addHarmonics = function(freqs) {
+  return function(image) {
+    // Hacer imágenes de frecuencias.
+    var frequencies = ee.Image.constant(freqs);
+    // Esta banda representa el tiempo en radianes.
+    var time = ee.Image(image).select('t');
+    // Obtener los términos de coseno.
+    var cosines = time.multiply(frequencies).cos().rename(cosNames);
+    // Obtener términos de seno.
+    var sines = time.multiply(frequencies).sin().rename(sinNames);
+    return image.addBands(cosines).addBands(sines);
+  };
+};
+// Filtrar al roi o "región of interes", enmascarar nubes, agregar variables.
+var harmonic = Coleccion
+  .filterBounds(roi)
+  //.map(maskClouds)
+  .map(addNDVI)
+  .map(addDependents)
+  .map(addHarmonics(harmonicFrequencies));
+// La salida es la reducción de la regresión de una matriz 4x1 de la imagen.
+var harmonicTrend = harmonic
+  .select(independents.add(dependent))
+  .reduce(ee.Reducer.linearRegression(independents.length(), 1));
+// Convierte la matriz de la imagen en una imagen multibanda de coeficientes.
+var harmonicTrendCoefficients = harmonicTrend.select('coefficients')
+  .arrayProject([0])
+  .arrayFlatten([independents]);
+// Calcular los valores de ajuste.
+var fittedHarmonic = harmonic.map(function(image) {
+  return image.addBands(
+    image.select(independents)
+      .multiply(harmonicTrendCoefficients)
+      .reduce('sum')
+      .rename('ajustado'));
+});
+// Graficar modelo ajustado y datos originales de la "roi".
+print(ui.Chart.image.series(fittedHarmonic.select(['ajustado','NDVI']), roi, ee.Reducer.mean(), 30)
+    .setOptions({
+      title: 'Modelo armónico con Sentinel2A: valores originales y ajustados',
+      lineWidth: 1,
+      pointSize: 1,
+}));
+// Jalar las 3 bandas a visualizar.
+var sin = harmonicTrendCoefficients.select('sin_1');
+var cos = harmonicTrendCoefficients.select('cos_1');
+// Hacer algo de matemáticas para convertir el modelo de primer orden de Fourier
+// en valores de tono y saturación (HSV) en el rango [0,1].
+var magnitude = cos.hypot(sin).multiply(5);
+var phase = sin.atan2(cos).unitScale(-Math.PI, Math.PI);
+var val = harmonic.select('NDVI').reduce('mean');
+Map.centerObject(roi, 8);
+Map.addLayer(roi, {}, 'Área');
