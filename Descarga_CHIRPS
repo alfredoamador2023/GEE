@@ -1,0 +1,73 @@
+var firstImage = ee.Date(ee.List(CHIRPS.get('date_range')).get(0));
+var latestImage = ee.Date(CHIRPS.limit(1, 'system:time_start',  false).first().get('system:time_start'));
+var exportdata = false;
+var startDateForDownload = '2021-06-01';
+var endDateForDownload = latestImage;
+var resolution = 5500;
+var timestep = '1'; 
+var shift = '0';
+var days = '16';
+var showInteractiveChart = false;
+var thresholdMonths = ee.Number(12)
+var timedif = (latestImage.difference(firstImage, 'month')).divide(ee.Number.parse(timestep));
+var list = ee.List.sequence(0, timedif); 
+var timeListDate = list.map(function(month){
+  var zero = ee.Number(0); 
+  var delta = (zero.subtract(month)).multiply(ee.Number.parse(timestep)); 
+  var latestDate = latestImage.advance(1, 'day');
+  return latestDate.advance(delta, 'month');
+});
+var sortedTimeList = timeListDate.sort();
+var PrecipitationSum = ee.ImageCollection.fromImages(timeListDate.map(function(monthly_sum){
+  var startTime = ee.Date(monthly_sum).advance(ee.Number.parse(timestep).multiply(-1), 'month');
+  var endTime = ee.Date(monthly_sum);
+  var filteredCHIRPS = CHIRPS.filterDate(startTime, endTime);
+  var clippedCHIRPS = filteredCHIRPS.map(function(clip){return clip.clip(AOI)});
+  var imageAmount = clippedCHIRPS.size();
+  var summedCollection = clippedCHIRPS
+    .sum()
+    .set({
+      'Used_Images': imageAmount,
+      'Start_Date': ee.Date(filteredCHIRPS.first().get('system:time_start')),
+      'End_Date': ee.Date(filteredCHIRPS.limit(1, 'system:time_end', false).first().get('system:time_end')),
+      'system:time_start': filteredCHIRPS.first().get('system:time_start'), 
+      'system:time_end': filteredCHIRPS.limit(1, 'system:time_end', false).first().get('system:time_end')
+    });
+  var time = ee.Date(summedCollection.get('system:time_end')).difference(ee.Date(summedCollection.get('system:time_start')), 'month').round();
+  var summedImage = summedCollection.set({
+    'Observed_Months': time
+  });
+return ee.Algorithms.If(
+  time.gte(ee.Number.parse(timestep)), 
+  summedImage);
+}));
+var summedChirpsCollection = ee.ImageCollection(PrecipitationSum.copyProperties(CHIRPS));
+print('El periodo-'+timestep+' empieza el ', firstImage.format('YYYY-MM-dd'),'y termina el ', latestImage.format('YYYY-MM-dd'));
+Map.centerObject(AOI, 10);
+Map.addLayer(AOI);
+var RoiWithLabels = AOI.map(function(addLabels){
+  var labelNames = addLabels;
+  return labelNames;
+});
+var ChartMonthlyPrecipitation = ui.Chart.image.seriesByRegion(
+  summedChirpsCollection, 
+  RoiWithLabels, 
+  ee.Reducer.mean(),
+  'precipitation', 
+  resolution,
+  'system:time_start', 
+  'labelMonthlyPrecip'
+  ).setOptions({
+    title: timestep+' Serie de Tiempo para el Municipio de:, (basado en CHIRPS)',
+    vAxis: {title: 'Precipitación en mm'},
+    hAxis: {title: 'Año'},
+    });
+print(timestep+' Pp mensual basada en valores promedio del área con base en Chirps:',ChartMonthlyPrecipitation);
+var title = ui.Label({
+  value: 'Puedes ver y descargar del panel "Console" la gráfica y los valores',
+  style:{
+  fontWeight: 'bold',
+  fontSize: '18px'
+  }});
+title.style().set('position', 'top-center');
+Map.add(title);
