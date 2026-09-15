@@ -1,0 +1,32 @@
+var startDate = '2025-05-01';
+var endDate = '2025-10-31';
+var dw = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filter(ee.Filter.date(startDate, endDate))
+  .filter(ee.Filter.bounds(table));
+var classification = dw.select('label');
+var dwComposite = classification.reduce(ee.Reducer.mode());
+var dwVisParams = {
+  min: 0,
+  max: 8,
+  palette: ['#419BDF', '#397D49', '#88B053', '#7A87C6',
+    '#E49635', '#DFC35A', '#C4281B', '#A59B8F', '#B39FE1']
+};
+Map.addLayer(dwComposite.clip(table), dwVisParams, 'Compuesto clasificado'); 
+var probabilityBands = [
+    'water', 'trees', 'grass', 'flooded_vegetation', 'crops',
+    'shrub_and_scrub', 'built', 'bare', 'snow_and_ice'
+    ];
+var probabilityCol = dw.select(probabilityBands);
+
+var meanProbability = probabilityCol.reduce(ee.Reducer.mean());
+
+var projection = ee.Projection('EPSG:4326').atScale(10);
+var meanProbability = meanProbability.setDefaultProjection(projection);
+
+Export.image.toDrive({
+  image: dwComposite.clip(table),
+  description: 'dw2025b',
+  crs: 'EPSG:4326',
+  region: table,
+  scale: 10,
+  maxPixels: 1e10});
